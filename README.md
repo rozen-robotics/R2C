@@ -1,2 +1,2 @@
-# R2-
+# R2C
 ROZEN Robot Connection
