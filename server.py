@@ -1,47 +1,53 @@
+import socket, asyncio
+from threading import Thread
+from multiprocessing import Process
+from struct import pack, unpack, calcsize
+from pickle import loads
+import cv2 as cv
 
-# This is server code to send video frames over UDP
-import cv2, imutils, socket
-import numpy as np
-import time
-import base64
 
-BUFF_SIZE = 65536
-server_socket = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-server_socket.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,BUFF_SIZE)
-host_name = socket.gethostname()
-host_ip = socket.gethostbyname(host_name)
-print(host_ip)
-port = 9999
-socket_address = (host_ip,port)
-server_socket.bind(socket_address)
-print('Listening at:',socket_address)
+HOST_IP = socket.gethostbyname(socket.gethostname())
+HOST_PORT = 6969
+HOST_ADDR = (HOST_IP, HOST_PORT)
 
-vid = cv2.VideoCapture(0) #  replace 'rocket.mp4' with 0 for webcam
-fps,st,frames_to_count,cnt = (0,0,20,0)
+serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+serverSocket.bind(HOST_ADDR)
+
+serverSocket.listen()
+print(f'listening on {HOST_ADDR}')
+
+def show_client(addr,client_socket):
+	try:
+		print('CLIENT {} CONNECTED!'.format(addr))
+		if client_socket: # if a client socket exists
+			data = b""
+			payload_size = calcsize("Q")
+			while True:
+				while len(data) < payload_size:
+					packet = client_socket.recv(4*1024) # 4K
+					if not packet: break
+					data+=packet
+				packed_msg_size = data[:payload_size]
+				data = data[payload_size:]
+				msg_size = unpack("Q",packed_msg_size)[0]
+				
+				while len(data) < msg_size:
+					data += client_socket.recv(4*1024)
+				frame_data = data[:msg_size]
+				data  = data[msg_size:]
+				frame = loads(frame_data)
+				text  =  f"CLIENT: {addr}"
+				cv.imshow(f"FROM {addr}",frame)
+				key = cv.waitKey(1) & 0xFF
+				if key  == ord('q'):
+					break
+			client_socket.close()
+	except Exception as e:
+		print(f"CLINET {addr} DISCONNECTED")
+		pass
 
 while True:
-	msg,client_addr = server_socket.recvfrom(BUFF_SIZE)
-	print('GOT connection from ',client_addr)
-	WIDTH=400
-	while(vid.isOpened()):
-		_,frame = vid.read()
-        #frame = imutils.resize(frame,width=WIDTH)
-		encoded,buffer = cv2.imencode('.jpg',frame, [cv2.IMWRITE_JPEG_QUALITY,80])
-		message = base64.b64encode(buffer)
-		server_socket.sendto(message,client_addr)
-		frame = cv2.putText(frame,'FPS: '+str(fps),(10,40),cv2.FONT_HERSHEY_SIMPLEX,0.7,(0,0,255),2)
-		cv2.imshow('TRANSMITTING VIDEO',frame)
-		key = cv2.waitKey(1) & 0xFF
-		if key == ord('q'):
-			server_socket.close()
-			break
-		if cnt == frames_to_count:
-			try:
-				fps = round(frames_to_count/(time.time()-st))
-				st=time.time()
-				cnt=0
-			except:
-				pass
-		cnt+=1
-
-
+	clients = []
+	clients.append(serverSocket.accept())
+	print(f'New connection from {clients[-1][1]}')
+	Process(target=show_client, args=(clients[-1][1],clients[-1][0])).start()

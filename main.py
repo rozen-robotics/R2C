@@ -1,18 +1,21 @@
-from r2cAPI import R2C
+from r2cAPI import TCPSocketHandler as tcp, R2C as rrc
 import cv2 as cv
+from time import time, sleep
+from multiprocessing import Process
 
 
-rrc = R2C(hostIP='192.168.0.101')
 cap = cv.VideoCapture(0)
 
 
 if __name__ == '__main__':
-    rrc.addStream(port=8000)
+    host = rrc('192.168.0.101', 6969)
 
-    while cv.waitKey(1) != ord('q'):
-        ret, frame = cap.read()
+    host.addStream('raw')
+    host.addStream('hsv')
 
-        hsvFrame = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
+    while True:
+        raw = cap.read()[1]
+        hsv = cv.cvtColor(raw, cv.COLOR_BGR2HSV)
 
-        rrc.sendFrame(port=8000, frame=hsvFrame)
-    rrc.closeAllStreams()
+        host.setFrame('raw', raw)
+        host.setFrame('hsv', hsv)
