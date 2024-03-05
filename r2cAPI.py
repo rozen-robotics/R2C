@@ -1,21 +1,32 @@
 import socket
+from pickle import dumps, loads
+from struct import pack, unpack, calcsize
 
 import cv2
 import numpy as np
 
-from pickle import dumps, loads
-from struct import pack, unpack, calcsize
-
 from time import time
+
 from loguru import logger as log
+from functools import wraps
+from typing import Union
+
+
+class R2C: ...
+class HSVTrackbars: ...
+class Frame: ...
+class TCPSocketHandler: ...
+class Client: ...
+class Server: ...
 
 
 Mat = np.ndarray
 Color = tuple[int, int, int]
 ColorRange = tuple[Color, Color]
+Result = bool
 
 
-class HSV_Trackbars:
+class HSVTrackbars:
     def __init__(self) -> object:
         self.windowName = 'HSV Trackbars'
         self.colorRange: ColorRange = ((0, 0, 0), (180, 255, 255))
@@ -85,91 +96,59 @@ class TCPSocketHandler:
         self.serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.isConnected = False
     
-    def start(self) -> bool:
+    @log.catch
+    def checkConnection(func) -> Union[Result, Exception]:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                func(*args, **kwargs)               
+                return True
+
+            except Exception as err:
+                log.error(err)
+                return False
+        return wrapper
+
+    @checkConnection
+    def start(self) -> Result:
         self.connect()
         self.sendConnectionType()
 
-    def connect(self) -> bool:
+    @checkConnection
+    def connect(self) -> Result:
         """
         Connect to the server
         """
-        if self.isConnected:
-            log.warning("Already connected to server")
-            return True
-
-        try:
-            self.serverSocket.connect(self.serverAddr)
-            self.isConnected = True
-            log.success('Connected to server')
-            return True
-        except Exception as e:
-            log.error(f"{e}")
-            return False
-        
-    def disconnect(self) -> bool:
+        self.serverSocket.connect(self.serverAddr)
+    
+    @checkConnection
+    def disconnect(self) -> Result:
         """
         Disconnect from the server
         """
-        if not self.isConnected:
-            log.warning("Not connected to server")
-            return True
-        
-        try:
-            self.sendData('disconnect'.encode())
-            self.serverSocket.close()
-            self.isConnected = False
-            log.success('Disconnected from server')
-            return True
-        
-        except Exception as e:
-            log.error(f"{e}")
-            return False
+        self.serverSocket.close()
+        return True
 
-    def sendData(self, data: bytes) -> bool:
+    @checkConnection
+    def sendData(self, data: bytes) -> Result:
         """
         Send data to the server
         """
-        if not self.isConnected:
-            log.error("Not connected to server")
-            return False
-        
-        try:
-            self.serverSocket.sendall(data)
-            return True
-        except Exception as e:
-            log.error(f"{e}")
-            return False
-        
-    def sendFrame(self, frame: Mat) -> bool:
+        self.serverSocket.sendall(data)
+
+    @checkConnection
+    def sendFrame(self, frame: Mat) -> Result:
         """
         Send a frame to the server
         """
-        if not self.isConnected:
-            log.error("Not connected to server")
-            return False
-
-        try:
-            self.serverSocket.sendall(Frame.cvt2bytes(frame))
-            return True
-        except Exception as e:
-            log.error(f"{e}")
-            return False
-
-    def sendConnectionType(self) -> bool:
+        self.serverSocket.sendall(Frame.cvt2bytes(frame))
+    
+    @checkConnection
+    def sendConnectionType(self) -> Result:
         """
         Send the connection type to the server
         """
-        if not self.isConnected:
-            log.error("Not connected to server")
-            return False
-        
-        try:
-            self.serverSocket.sendall(self.connectionType.encode())
-            log.success('Sent connection type')
-            return True 
-        except:
-            log.error('Failed to send connection type')
-            return False
+        self.serverSocket.sendall(self.connectionType.encode())
 
 class R2C:
     def __init__(self,
@@ -183,56 +162,45 @@ class R2C:
         self.streams = {}
     
     def addStream(self, 
-                  streamName: str = 'default',
+                  streamName: str = 'default', 
                   connectionType: str = 'None'
-                  ) -> TCPSocketHandler:
+                  ) -> Result:
         """
         Add a stream to the server
         """
-        if streamName in self.streams:
-            log.warning(f"Stream {streamName} already exists")
-            return self.streams[streamName]
+        self.streams[streamName] = TCPSocketHandler(
+            self.serverIP,
+            self.serverPort,
+            connectionType
+        )
+        return self.streams[streamName].start()
         
-        try:
-            self.streams[streamName] = TCPSocketHandler(self.serverIP, 
-                                                        self.serverPort,
-                                                        connectionType)
-            self.streams[streamName].start()
-            log.success(f"Stream {streamName} added")
-            return self.streams[streamName]
-        except Exception as e:
-            log.error(f"{e}")
-            return False
+    def print(self, 
+                 streamName: str, 
+                 data: str
+                 ) -> Result:
+        """
+        Set a frame to the server
+        """
+        assert streamName in self.streams, f'Stream <{streamName}> exist!'
+        return self.streams[streamName].sendData(data.encode())
     
-    def sendData(self, streamName: str, data: str) -> bool:
+    def imshow(self, 
+               streamName: str, 
+               frame: Mat
+               ) -> Result:
         """
         Set a frame to the server
         """
-        if streamName not in self.streams:
-            log.warning(f"Stream {streamName} does not exist")
-            return False
-
-        try:
-            self.streams[streamName].sendData(data.encode())
-            return True
-        except Exception as e:
-            log.error(f"{e}")
-            return False
+        assert streamName in self.streams, f'Stream <{streamName}> exist!'
+        return self.streams[streamName].sendFrame(frame)
         
-    def imshow(self, streamName: str, frame: Mat) -> bool:
+    def closeAll(self):
         """
-        Set a frame to the server
+        Close all streams sockets
         """
-        if streamName not in self.streams:
-            log.warning(f"Stream {streamName} does not exist")
-            return False
-
-        try:
-            self.streams[streamName].sendFrame(frame)
-            return True
-        except Exception as e:
-            log.error(f"{e}")
-            return False
+        for streamName in self.streams:
+            self.streams[streamName].disconnect()
 
 class Client:
     def __init__(self, 
@@ -253,6 +221,10 @@ class Client:
     def handle(self) -> bool:
         log.info(f'\nHandle {self.clientType} from {self.clientAddress}')
 
+        if not self.clientSocket:
+            log.warning(f'Client on {self.clientAddress} disconnected')
+            return False
+
         match self.clientType:
             case 'Frame-Stream':
                 self.getStream()
@@ -262,6 +234,7 @@ class Client:
 
             case 'HSV-Stream':
                 self.getStream(trackbars='HSV')
+        return True
 
     def getData(self) -> None:
         while self.clientSocket:
@@ -276,7 +249,7 @@ class Client:
                     cv2.namedWindow('Default window')
 
                 case 'HSV':
-                    hsvWindow = HSV_Trackbars()
+                    hsvWindow = HSVTrackbars()
 
             while cv2.waitKey(1) != ord('q'):
                 while len(data) < payloadSize:
@@ -301,7 +274,6 @@ class Client:
                     
                     case 'HSV':
                         hsvWindow.showMask(frame)
-
             self.clientSocket.close()
 
 class Server:

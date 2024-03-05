@@ -1,18 +1,17 @@
-from r2cAPI import R2C as rrc, Frame
 import cv2 as cv
-from time import time
-
+from time import time, sleep
+from r2cAPI import *
 
 if __name__ == '__main__':
     cap = cv.VideoCapture(0)
 
-    host = rrc(serverIP='192.168.0.101', # Put your server IP
+    host = R2C(serverIP='192.168.1.122', # Put your server IP
                serverPort=6969)          # Put your server Port (must be >1023)
+    host.addStream('hsv',  connectionType='HSV-Stream')
     host.addStream('raw',  connectionType='Frame-Stream')
     host.addStream('data', connectionType='Data-Stream')
-    host.addStream('hsv',  connectionType='HSV-Stream')
 
-
+    
     fpsTmr = time()
     while cv.waitKey(1) != ord('q'):
         raw = cap.read()[1]
@@ -20,7 +19,10 @@ if __name__ == '__main__':
 
         fpsTmr = Frame.putFPS(raw, round(1 / (time() - fpsTmr)))
 
-        cv.imshow('raw', raw)
-        host.imshow('raw', raw)
         host.imshow('hsv', hsv)
-        host.sendData('data', 'Hello, Host!')
+        host.imshow('raw', raw)
+        host.imshow('raw1', raw)
+        host.imshow('raw2', raw)
+        host.imshow('raw3', raw)
+        host.imshow('raw4', raw)
+        host.print('data', 'Hello, Host!')
